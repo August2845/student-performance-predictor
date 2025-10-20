@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -72,7 +72,7 @@ func saveToCSV(data []Student, filename string) {
 	fmt.Println("✅ Данные сохранены в", filename)
 }
 
-// ---------------------- Вспомогательные ----------------------
+// ---------------------- Математика ----------------------
 
 func euclidDist(a, b []float64) float64 {
 	var sum float64
@@ -89,24 +89,28 @@ func min(a, b int) int {
 	return b
 }
 
-// ---------------------- k-NN модель ----------------------
+// ---------------------- Модель kNN ----------------------
 
 func predictKNN(Xtrain [][]float64, ytrain []float64, Xtest [][]float64, k int) []float64 {
 	n := len(Xtest)
 	res := make([]float64, n)
+
 	for i := 0; i < n; i++ {
 		type pair struct {
 			dist float64
 			val  float64
 		}
 		arr := make([]pair, len(Xtrain))
+
 		for j := 0; j < len(Xtrain); j++ {
 			d := euclidDist(Xtest[i], Xtrain[j])
 			arr[j] = pair{dist: d, val: ytrain[j]}
 		}
+
 		sort.Slice(arr, func(a, b int) bool {
 			return arr[a].dist < arr[b].dist
 		})
+
 		var sum float64
 		kk := min(k, len(arr))
 		for t := 0; t < kk; t++ {
@@ -115,13 +119,6 @@ func predictKNN(Xtrain [][]float64, ytrain []float64, Xtest [][]float64, k int) 
 		res[i] = sum / float64(kk)
 	}
 	return res
-}
-
-func splitData(data []Student, ratio float64) (train, test []Student) {
-	n := len(data)
-	trainSize := int(float64(n) * ratio)
-	rand.Shuffle(n, func(i, j int) { data[i], data[j] = data[j], data[i] })
-	return data[:trainSize], data[trainSize:]
 }
 
 func prepareXY(data []Student) ([][]float64, []float64) {
@@ -134,16 +131,7 @@ func prepareXY(data []Student) ([][]float64, []float64) {
 	return X, y
 }
 
-func mse(yTrue, yPred []float64) float64 {
-	var sum float64
-	for i := range yTrue {
-		diff := yTrue[i] - yPred[i]
-		sum += diff * diff
-	}
-	return sum / float64(len(yTrue))
-}
-
-// ---------------------- Глобальные данные ----------------------
+// ---------------------- Глобальные данные модели ----------------------
 
 var (
 	trainData []Student
@@ -151,93 +139,82 @@ var (
 	ytrain    []float64
 )
 
-// ---------------------- HTTP сервер ----------------------
+// ---------------------- Веб-интерфейс ----------------------
 
-func predictHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
-		var input struct {
-			Attendance float64 `json:"attendance"`
-			Homework   float64 `json:"homework"`
-			TestScore  float64 `json:"testscore"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			http.Error(w, "Ошибка входных данных", 400)
-			return
-		}
-
-		Xtest := [][]float64{{input.Attendance, input.Homework, input.TestScore}}
-		yPred := predictKNN(Xtrain, ytrain, Xtest, 5)
-
-		result := map[string]float64{"predicted": yPred[0]}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
-		return
-	}
-
-	tmpl := template.Must(template.New("index").Parse(htmlPage))
-	tmpl.Execute(w, nil)
-}
-
-const htmlPage = `
+const htmlTemplate = `
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<title>Прогноз успеваемости студентов</title>
-<style>
-body { font-family: Arial; background: #f8f9fa; margin: 50px; }
-.container { max-width: 400px; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-input { width: 100%; padding: 8px; margin: 5px 0; border: 1px solid #ccc; border-radius: 5px; }
-button { background: #007bff; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; width: 100%; }
-button:hover { background: #0056b3; }
-h2 { text-align: center; }
-</style>
+	<meta charset="UTF-8">
+	<title>Прогноз успеваемости студентов</title>
+	<style>
+		body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f7f7f7; }
+		h1 { text-align: center; color: #333; }
+		form { display: flex; flex-direction: column; gap: 10px; }
+		label { font-weight: bold; }
+		input { padding: 8px; font-size: 14px; border-radius: 8px; border: 1px solid #aaa; }
+		button { padding: 10px; border: none; background: #007bff; color: white; font-weight: bold; border-radius: 8px; cursor: pointer; }
+		button:hover { background: #0056b3; }
+		.result { background: white; padding: 15px; margin-top: 20px; border-radius: 10px; box-shadow: 0 0 8px rgba(0,0,0,0.1); }
+	</style>
 </head>
 <body>
-<div class="container">
-<h2>📈 Прогноз итоговой оценки</h2>
-<label>Посещаемость (%)</label>
-<input id="attendance" type="number" value="90" min="0" max="100">
-<label>Домашние задания (%)</label>
-<input id="homework" type="number" value="85" min="0" max="100">
-<label>Результат тестов (%)</label>
-<input id="testscore" type="number" value="80" min="0" max="100">
-<button onclick="predict()">Рассчитать прогноз</button>
-<h3 id="result"></h3>
-</div>
-<script>
-async function predict() {
-  const data = {
-    attendance: parseFloat(document.getElementById('attendance').value),
-    homework: parseFloat(document.getElementById('homework').value),
-    testscore: parseFloat(document.getElementById('testscore').value)
-  };
-  const res = await fetch('/', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
-  });
-  const json = await res.json();
-  document.getElementById('result').innerText = "Прогноз: " + json.predicted.toFixed(2);
-}
-</script>
+	<h1>🎓 Прогноз успеваемости студента</h1>
+	<form action="/" method="POST">
+		<label>Посещаемость (%)</label>
+		<input type="number" step="0.1" name="attendance" required>
+		<label>Домашние задания (%)</label>
+		<input type="number" step="0.1" name="homework" required>
+		<label>Тесты (%)</label>
+		<input type="number" step="0.1" name="testscore" required>
+		<button type="submit">Предсказать</button>
+	</form>
+	{{if .Show}}
+	<div class="result">
+		<h3>Результат:</h3>
+		<p>📊 Прогнозируемый итоговый балл: <strong>{{printf "%.2f" .Prediction}}</strong></p>
+	</div>
+	{{end}}
 </body>
 </html>
 `
 
-// ---------------------- MAIN ----------------------
+func handler(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.New("index").Parse(htmlTemplate))
+	if r.Method == "GET" {
+		tmpl.Execute(w, nil)
+		return
+	}
+
+	// Обработка формы
+	attendance, _ := strconv.ParseFloat(r.FormValue("attendance"), 64)
+	homework, _ := strconv.ParseFloat(r.FormValue("homework"), 64)
+	testScore, _ := strconv.ParseFloat(r.FormValue("testscore"), 64)
+
+	Xtest := [][]float64{{attendance, homework, testScore}}
+	pred := predictKNN(Xtrain, ytrain, Xtest, 5)[0]
+
+	data := struct {
+		Show       bool
+		Prediction float64
+	}{
+		Show:       true,
+		Prediction: pred,
+	}
+
+	tmpl.Execute(w, data)
+}
+
+// ---------------------- main ----------------------
 
 func main() {
-	// 1. Генерируем данные
 	data := generateData(200)
 	saveToCSV(data, "students.csv")
 
-	// 2. Делим на обучающие/тестовые
-	train, _ := splitData(data, 0.8)
-	Xtrain, ytrain = prepareXY(train)
+	trainData = data
+	Xtrain, ytrain = prepareXY(trainData)
 
-	// 3. Запуск веб-интерфейса
-	fmt.Println("🌐 Открой в браузере: http://localhost:8080")
-	http.HandleFunc("/", predictHandler)
+	http.HandleFunc("/", handler)
+	fmt.Println("🌐 Сервер запущен: http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
