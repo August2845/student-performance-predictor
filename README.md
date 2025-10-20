@@ -35,8 +35,7 @@
 
 2. Клонируйте репозиторий:
    ```bash
-   git clone https://github.com/<твой_логин>/<репозиторий>.git
-   cd <репозиторий>
+   git clone https://github.com/August2845/student-performance-predictor.git
    ```
 
 3. Запустите приложение:
