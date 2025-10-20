@@ -1,0 +1,11 @@
+
+bin/
+*.exe
+*.out
+*.test
+
+
+go.sum
+
+
+students.csv
